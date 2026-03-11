@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PawFeeder — Smart Pet Feeder</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/mqtt/4.3.7/mqtt.min.js"></script>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ── HEADER ─────────────────────────────────── -->
+<header>
+  <div class="brand">
+    <div class="brand-icon">🐾</div>
+    <div class="brand-text">
+      <h1>PawFeeder</h1>
+      <p>ESP32 · MQTT · IoT</p>
+    </div>
+  </div>
+  <div class="conn-badge">
+    <div class="conn-dot mid" id="dot"></div>
+    <span id="connText">Menghubungkan...</span>
+  </div>
+</header>
+
+<!-- ── MAIN LAYOUT ────────────────────────────── -->
+<div class="main-wrap">
+
+  <!-- ═══ LEFT PANEL ═══════════════════════════ -->
+  <div class="left-panel">
+
+    <!-- TOP ROW: 4 stat cards -->
+    <div class="stats-row">
+
+      <!-- Waktu -->
+      <div class="card" style="--accent:#3b82f6; animation-delay:0.05s">
+        <div class="card-label">⏰ Waktu</div>
+        <div class="card-value" id="valWaktu" style="font-size:1.6rem">--:--</div>
+        <div class="card-sub">Sinkronisasi NTP</div>
+      </div>
+
+      <!-- Stok Pakan — dari HC-SR04 -->
+      <div class="card" style="--accent:#22c55e; animation-delay:0.1s">
+        <div class="card-label">📡 Stok Pakan</div>
+        <div class="card-value" id="valStok" style="font-size:1.4rem">---</div>
+        <div class="stok-bar-wrap">
+          <div class="stok-bar-fill" id="stokBar" style="width:0%"></div>
+        </div>
+        <div class="stok-tags">
+          <span class="stok-tag">HABIS</span>
+          <span class="stok-tag">SEDANG</span>
+          <span class="stok-tag">FULL</span>
+        </div>
+        <div class="card-sub" style="margin-top:8px">Sensor HC-SR04</div>
+      </div>
+
+      <!-- Deteksi Hewan -->
+      <div class="card" style="--accent:#f97316; animation-delay:0.15s">
+        <div class="card-label">🐱 Hewan</div>
+        <div class="card-value" id="valHewan" style="font-size:1rem; margin-top:6px; color:#64748b">---</div>
+        <div class="card-sub" id="valMakan">Makan: -- kali</div>
+      </div>
+
+      <!-- Konsumsi -->
+      <div class="card" style="--accent:#eab308; animation-delay:0.2s">
+        <div class="card-label">📊 Konsumsi</div>
+        <div class="card-value" id="valKonsumsi" style="color:#eab308">0.00</div>
+        <div class="card-sub">KG hari ini</div>
+      </div>
+
+    </div><!-- /stats-row -->
+
+    <!-- BOTTOM ROW: servo + jadwal -->
+    <div class="controls-row">
+
+      <!-- Servo Card -->
+      <div class="card" style="--accent:#ef4444; animation-delay:0.25s">
+        <div class="card-label">⚙️ Kontrol Servo</div>
+        <div class="card-value" id="valServo" style="font-size:1rem; color:#64748b">---</div>
+        <div class="servo-status-bar">
+          <div class="servo-status-fill" id="servoStatusFill"></div>
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-open"  id="btnBuka"  onclick="kirimServo('ON')"  disabled>▶ Buka</button>
+          <button class="btn btn-close" id="btnTutup" onclick="kirimServo('OFF')" disabled>■ Tutup</button>
+        </div>
+        <div class="servo-lock" id="servoLock">
+          🔒 Servo terkunci — Auto Mode aktif
+        </div>
+      </div>
+
+      <!-- Jadwal Card -->
+      <div class="card" style="--accent:#a78bfa; animation-delay:0.3s">
+        <div class="card-label">📅 Jadwal Otomatis</div>
+
+        <div class="jadwal-section">
+          <div class="jadwal-label">🌅 Pagi</div>
+          <div class="jadwal-row">
+            <input type="time" class="time-input" id="inputPagi" value="08:00">
+            <button class="btn-set" id="btnSetPagi" onclick="kirimJadwal()" disabled>Set</button>
+          </div>
+
+          <div class="jadwal-label">🌙 Malam</div>
+          <div class="jadwal-row">
+            <input type="time" class="time-input" id="inputMalam" value="19:00">
+            <button class="btn-set" id="btnSetMalam" onclick="kirimJadwal()" disabled>Set</button>
+          </div>
+        </div>
+
+        <div class="toggle-row">
+          <span class="toggle-label">Auto Mode</span>
+          <label class="toggle">
+            <input type="checkbox" id="toggleAuto" onchange="kirimAutoMode()">
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <div class="jadwal-chips">
+          <div class="chip">🌅 <span id="infoPagi">08:00</span></div>
+          <div class="chip">🌙 <span id="infoMalam">19:00</span></div>
+          <div class="chip">Auto: <span id="infoAutoMode" style="color:#64748b">OFF</span></div>
+        </div>
+      </div>
+
+    </div><!-- /controls-row -->
+
+  </div><!-- /left-panel -->
+
+  <!-- ═══ RIGHT PANEL: WADAH PAKAN ═════════════ -->
+  <div class="right-panel">
+
+    <div class="wadah-card">
+      <div class="wadah-title">⚖️ Berat Wadah Pakan</div>
+
+      <div class="wadah-visual">
+
+        <!-- Gauge ring -->
+        <div class="gauge-wrap">
+          <svg class="gauge-svg" width="60" height="60" viewBox="0 0 60 60">
+            <circle class="gauge-bg"   cx="30" cy="30" r="25"/>
+            <circle class="gauge-fill" id="gaugeFill" cx="30" cy="30" r="25"/>
+          </svg>
+        </div>
+
+        <!-- Container visual -->
+        <div class="wadah-outer" id="wadahOuter">
+          <!-- Fill level -->
+          <div class="wadah-fill" id="wadahFill" style="height:0%"></div>
+
+          <!-- Tick marks -->
+          <div class="wadah-ticks">
+            <div class="tick"><div class="tick-line"></div><div class="tick-label">3kg</div></div>
+            <div class="tick"><div class="tick-line"></div><div class="tick-label">2kg</div></div>
+            <div class="tick"><div class="tick-line"></div><div class="tick-label">1kg</div></div>
+            <div class="tick"><div class="tick-line"></div><div class="tick-label">0kg</div></div>
+          </div>
+        </div>
+
+        <!-- Weight number -->
+        <div class="wadah-weight">
+          <div class="val" id="wadahVal">0.00</div>
+          <div class="unit">KG</div>
+          <div class="target">Target: 3.0 KG</div>
+        </div>
+
+        <!-- Status chip -->
+        <div class="status-chip" id="wadahChip"
+             style="color:#64748b; border-color:#64748b44; background:#64748b11">
+          — Menunggu data
+        </div>
+
+      </div><!-- /wadah-visual -->
+    </div><!-- /wadah-card -->
+
+    <!-- Mini info cards -->
+    <div class="card" style="--accent:#14b8a6; padding:14px 16px; animation-delay:0.35s">
+      <div class="card-label" style="margin-bottom:8px">📶 Status Koneksi</div>
+      <div style="display:flex; flex-direction:column; gap:6px;">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <span style="font-size:0.72rem; color:var(--muted2)">Broker</span>
+          <span style="font-size:0.7rem; font-family:'DM Mono',monospace; color:var(--cyan)">HiveMQ</span>
+        </div>
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <span style="font-size:0.72rem; color:var(--muted2)">Pub Topic</span>
+          <span style="font-size:0.65rem; font-family:'DM Mono',monospace; color:var(--purple)">pakan/kontrol</span>
+        </div>
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <span style="font-size:0.72rem; color:var(--muted2)">Sub Topic</span>
+          <span style="font-size:0.65rem; font-family:'DM Mono',monospace; color:var(--orange)">pakan/monitoring</span>
+        </div>
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <span style="font-size:0.72rem; color:var(--muted2)">WiFi ESP32</span>
+          <span style="font-size:0.72rem; font-family:'DM Mono',monospace;" id="wifiStatus">--</span>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /right-panel -->
+
+</div><!-- /main-wrap -->
+
+<!-- ── SERIAL MONITOR ──────────────────────────── -->
+<div class="monitor-wrap">
+  <div class="monitor-head">
+    <span class="monitor-title">Serial Monitor</span>
+    <button class="btn-clr" onclick="clearLog()">CLEAR</button>
+  </div>
+  <div id="monitor"></div>
+</div>
+
+<!-- ── SCRIPT ──────────────────────────────────── -->
+<script src="app.js"></script>
+
+</body>
+</html>
